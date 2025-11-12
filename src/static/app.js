@@ -3,6 +3,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const filterSearch = document.getElementById("filter-search");
+  const filterCategory = document.getElementById("filter-category");
+  const filterSort = document.getElementById("filter-sort");
+
+  // Keep a copy of all activities fetched from server
+  let allActivities = {};
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -10,21 +16,120 @@ document.addEventListener("DOMContentLoaded", () => {
       const response = await fetch("/activities");
       const activities = await response.json();
 
-      // Clear loading message
-      activitiesList.innerHTML = "";
+      // Save original activities and populate UI controls
+      allActivities = activities;
+      populateFilterCategories(activities);
+      populateActivitySelect(activities);
 
-      // Populate activities list
-      Object.entries(activities).forEach(([name, details]) => {
-        const activityCard = document.createElement("div");
-        activityCard.className = "activity-card";
+      // Render activities according to current filters/sort
+      applyFiltersAndRender();
+    } catch (error) {
+      activitiesList.innerHTML =
+        "<p>Failed to load activities. Please try again later.</p>";
+      console.error("Error fetching activities:", error);
+    }
+  }
 
-        const spotsLeft =
-          details.max_participants - details.participants.length;
+  function populateActivitySelect(activities) {
+    // Clear existing options (keep placeholder)
+    activitySelect.querySelectorAll("option").forEach((o) => {
+      if (o.value !== "") o.remove();
+    });
 
-        // Create participants HTML with delete icons instead of bullet points
-        const participantsHTML =
-          details.participants.length > 0
-            ? `<div class="participants-section">
+    Object.keys(activities).forEach((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      activitySelect.appendChild(option);
+    });
+  }
+
+  function populateFilterCategories(activities) {
+    // Collect unique categories from activities
+    const categories = new Set();
+    Object.values(activities).forEach((d) => {
+      if (d.category) categories.add(d.category);
+    });
+
+    // Clear existing and add 'All'
+    filterCategory.innerHTML = "";
+    const allOpt = document.createElement("option");
+    allOpt.value = "";
+    allOpt.textContent = "All categories";
+    filterCategory.appendChild(allOpt);
+
+    Array.from(categories)
+      .sort()
+      .forEach((c) => {
+        const option = document.createElement("option");
+        option.value = c;
+        option.textContent = c;
+        filterCategory.appendChild(option);
+      });
+  }
+
+  function applyFiltersAndRender() {
+    // Create an array of entries [name, details]
+    const entries = Object.entries(allActivities || {});
+
+    // Apply search filter
+    const q = filterSearch.value.trim().toLowerCase();
+    let filtered = entries.filter(([name, details]) => {
+      if (q) {
+        return (
+          name.toLowerCase().includes(q) ||
+          (details.description || "").toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+
+    // Apply category filter
+    const cat = filterCategory.value;
+    if (cat) {
+      filtered = filtered.filter(([, details]) => details.category === cat);
+    }
+
+    // Apply sorting
+    const sort = filterSort.value;
+    filtered.sort((a, b) => {
+      const [nameA, detailsA] = a;
+      const [nameB, detailsB] = b;
+      if (sort === "name-asc") return nameA.localeCompare(nameB);
+      if (sort === "name-desc") return nameB.localeCompare(nameA);
+      if (sort === "spots-asc")
+        return (
+          detailsA.max_participants - detailsA.participants.length -
+          (detailsB.max_participants - detailsB.participants.length)
+        );
+      if (sort === "spots-desc")
+        return (
+          detailsB.max_participants - detailsB.participants.length -
+          (detailsA.max_participants - detailsA.participants.length)
+        );
+      return 0;
+    });
+
+    renderActivitiesList(filtered);
+  }
+
+  function renderActivitiesList(entries) {
+    activitiesList.innerHTML = "";
+
+    if (!entries || entries.length === 0) {
+      activitiesList.innerHTML = "<p>No activities match your criteria.</p>";
+      return;
+    }
+
+    entries.forEach(([name, details]) => {
+      const activityCard = document.createElement("div");
+      activityCard.className = "activity-card";
+
+      const spotsLeft = details.max_participants - details.participants.length;
+
+      const participantsHTML =
+        details.participants.length > 0
+          ? `<div class="participants-section">
               <h5>Participants:</h5>
               <ul class="participants-list">
                 ${details.participants
@@ -35,36 +140,26 @@ document.addEventListener("DOMContentLoaded", () => {
                   .join("")}
               </ul>
             </div>`
-            : `<p><em>No participants yet</em></p>`;
+          : `<p><em>No participants yet</em></p>`;
 
-        activityCard.innerHTML = `
-          <h4>${name}</h4>
-          <p>${details.description}</p>
-          <p><strong>Schedule:</strong> ${details.schedule}</p>
-          <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
-          <div class="participants-container">
-            ${participantsHTML}
-          </div>
-        `;
+      activityCard.innerHTML = `
+        <h4>${name}</h4>
+        <p>${details.description}</p>
+        <p><strong>Category:</strong> ${details.category || "—"}</p>
+        <p><strong>Schedule:</strong> ${details.schedule}</p>
+        <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
+        <div class="participants-container">
+          ${participantsHTML}
+        </div>
+      `;
 
-        activitiesList.appendChild(activityCard);
+      activitiesList.appendChild(activityCard);
+    });
 
-        // Add option to select dropdown
-        const option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        activitySelect.appendChild(option);
-      });
-
-      // Add event listeners to delete buttons
-      document.querySelectorAll(".delete-btn").forEach((button) => {
-        button.addEventListener("click", handleUnregister);
-      });
-    } catch (error) {
-      activitiesList.innerHTML =
-        "<p>Failed to load activities. Please try again later.</p>";
-      console.error("Error fetching activities:", error);
-    }
+    // Add event listeners to delete buttons
+    document.querySelectorAll(".delete-btn").forEach((button) => {
+      button.addEventListener("click", handleUnregister);
+    });
   }
 
   // Handle unregister functionality
@@ -155,6 +250,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Initialize app
+  // Wire up filter events
+  filterSearch.addEventListener("input", () => applyFiltersAndRender());
+  filterCategory.addEventListener("change", () => applyFiltersAndRender());
+  filterSort.addEventListener("change", () => applyFiltersAndRender());
+
+  // Initial load
   fetchActivities();
 });
